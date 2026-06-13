@@ -1,36 +1,38 @@
 import csv
 import math
 
-def calcular_limites_rangos(datos_train, indices_atributos):
-    """Calcula los umbrales para dividir cada atributo numérico en 3 rangos (Bajo, Medio, Alto) 
-    usando los datos de entrenamiento para no contaminar el testeo."""
+def calcular_limites_rangos(datos_train, indices_atributos, num_rangos=3):
+    """Calcula los umbrales para dividir cada atributo numérico en 'num_rangos' partes iguales."""
     limites = {}
     for idx in indices_atributos:
         # Extraer todos los valores numéricos de esa columna y ordenarlos
         valores = sorted([float(fila[idx]) for fila in datos_train])
         n = len(valores)
         
-        # Calcular los índices para dividir en 3 partes iguales (tercios)
-        tercio1 = valores[int(n * 1/3)]
-        tercio2 = valores[int(n * 2/3)]
-        
-        limites[idx] = (tercio1, tercio2)
+        # Calcular los umbrales dinámicamente
+        umbrales = []
+        for i in range(1, num_rangos):
+            indice = int(n * i / num_rangos)
+            umbrales.append(valores[indice])
+            
+        limites[idx] = umbrales
     return limites
 
 def discretizar_instancia(fila, limites, indices_atributos):
-    """Convierte una fila numérica en una fila de categorías ('Bajo', 'Medio', 'Alto')"""
+    """Convierte una fila numérica en una fila de categorías enteras ('1', '2', ..., 'N')"""
     fila_discreta = [fila[0]] # Mantener la clase intacta en la primera columna
     
     for idx in indices_atributos:
         valor = float(fila[idx])
-        t1, t2 = limites[idx]
+        umbrales = limites[idx]
         
-        if valor <= t1:
-            categoria = "Bajo"
-        elif valor <= t2:
-            categoria = "Medio"
-        else:
-            categoria = "Alto"
+        categoria = str(len(umbrales) + 1) 
+        # Asignamos nivel "1", "2", etc.
+        for i, umbral in enumerate(umbrales):
+            if valor <= umbral:
+                categoria = str(i + 1) 
+                break
+                
         fila_discreta.append(categoria)
         
     return fila_discreta
@@ -78,7 +80,7 @@ class NodoID3:
         self.es_hoja = es_hoja
         self.clase_predicha = clase_predicha
 
-def construir_arbol_id3(instancias, atributos_disponibles):
+def construir_arbol_id3(instancias, atributos_disponibles, num_rangos=3):
     clases = [fila[0] for fila in instancias]
     clase_mayoritaria = max(set(clases), key=clases.count)
     
@@ -107,14 +109,16 @@ def construir_arbol_id3(instancias, atributos_disponibles):
     nodo = NodoID3(atributo=mejor_atrib)
     nuevos_atributos = [a for a in atributos_disponibles if a != mejor_atrib]
     
-    # ID3 crea una rama por cada categoría posible
-    for categoria in ["Bajo", "Medio", "Alto"]:
+    # ID3 crea una rama por cada categoría posible dinámicamente (1 a num_rangos)
+    for nivel in range(1, num_rangos + 1):
+        categoria = str(nivel)
         sub_instancias = mejores_grupos.get(categoria, [])
         if not sub_instancias:
             # Si una rama se queda vacía, se le asigna la clase mayoritaria del nodo padre
             nodo.hijos[categoria] = NodoID3(es_hoja=True, clase_predicha=clase_mayoritaria)
         else:
-            nodo.hijos[categoria] = construir_arbol_id3(sub_instancias, nuevos_atributos)
+            # Pasamos num_rangos a la llamada recursiva
+            nodo.hijos[categoria] = construir_arbol_id3(sub_instancias, nuevos_atributos, num_rangos)
             
     return nodo
 
@@ -137,14 +141,17 @@ train_crudo = cargar_csv('wine_train.csv')
 test_crudo = cargar_csv('wine_test.csv')
 indices_atributos = list(range(1, len(train_crudo[0])))
 
-# 2. Calcular límites basados EN EL ENTRENAMIENTO y discretizar ambos conjuntos
-limites_rangos = calcular_limites_rangos(train_crudo, indices_atributos)
+# Puedes cambiar este valor para probar con 4, 5 o más rangos
+CANTIDAD_RANGOS = 5 
+
+# 2. Calcular límites basados EN EL ENTRENAMIENTO y discretizar
+limites_rangos = calcular_limites_rangos(train_crudo, indices_atributos, CANTIDAD_RANGOS)
 
 train_discreto = [discretizar_instancia(f, limites_rangos, indices_atributos) for f in train_crudo]
 test_discreto = [discretizar_instancia(f, limites_rangos, indices_atributos) for f in test_crudo]
 
-print("--- Entrenando Modelo ID3 Puro (Datos Discretizados) ---")
-arbol_id3 = construir_arbol_id3(train_discreto, indices_atributos)
+print(f"--- Entrenando Modelo ID3 Puro (Datos Discretizados en {CANTIDAD_RANGOS} niveles) ---")
+arbol_id3 = construir_arbol_id3(train_discreto, indices_atributos, CANTIDAD_RANGOS)
 print("¡Modelo Categórico Generado con éxito!\n")
 
 # 3. Evaluar
